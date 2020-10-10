@@ -68,10 +68,33 @@ var entityMap = {
   '=': '&#x3D;'
 };
 
-function escapeHtml (string) {
-  return String(string).replace(/[&<>"'`=\/]/g, function fromEntityMap (s) {
-    return entityMap[s];
-  });
+function escapeHtml (value) {
+  // Null and undefined inputs are serialized as empty strings.
+  if (value == null) {
+    return '';
+  }
+  // These input value types are guaranteed to not contain HTML special
+  // characters when using JavaScript's built-in stringification logic,
+  // so take a short and more optimal path when handling these inputs.
+  else if (typeof value === 'number' || value === true || value === false) {
+    return String(value);
+  }
+  // Other input values can contain HTML special characters when stringified.
+  // A replacement step is required to ensure that these strings are HTML-safe.
+  else {
+    return String(value).replace(/[&<>"'`=\/]/g, function fromEntityMap (s) {
+      return entityMap[s];
+    });
+  }
+}
+
+function writeValueRaw (value) {
+  if (value == null) {
+    return '';
+  }
+  else {
+    return String(value);
+  }
 }
 
 var whiteRe = /\s*/;
@@ -571,7 +594,7 @@ Writer.prototype.renderTokens = function renderTokens (tokens, context, partials
     if (symbol === '#') value = this.renderSection(token, context, partials, originalTemplate, config);
     else if (symbol === '^') value = this.renderInverted(token, context, partials, originalTemplate, config);
     else if (symbol === '>') value = this.renderPartial(token, context, partials, config);
-    else if (symbol === '&') value = this.unescapedValue(token, context);
+    else if (symbol === '&') value = this.unescapedValue(token, context, config);
     else if (symbol === 'name') value = this.escapedValue(token, context, config);
     else if (symbol === 'text') value = this.rawValue(token);
 
@@ -654,17 +677,16 @@ Writer.prototype.renderPartial = function renderPartial (token, context, partial
   }
 };
 
-Writer.prototype.unescapedValue = function unescapedValue (token, context) {
+Writer.prototype.unescapedValue = function unescapedValue (token, context, config) {
+  var raw = this.getConfigRaw(config) || mustache.raw;
   var value = context.lookup(token[1]);
-  if (value != null)
-    return value;
+  return raw(value);
 };
 
 Writer.prototype.escapedValue = function escapedValue (token, context, config) {
   var escape = this.getConfigEscape(config) || mustache.escape;
   var value = context.lookup(token[1]);
-  if (value != null)
-    return (typeof value === 'number' && escape === mustache.escape) ? String(value) : escape(value);
+  return escape(value);
 };
 
 Writer.prototype.rawValue = function rawValue (token) {
@@ -692,12 +714,22 @@ Writer.prototype.getConfigEscape = function getConfigEscape (config) {
   }
 };
 
+Writer.prototype.getConfigRaw = function getConfigRaw (config) {
+  if (config && typeof config === 'object' && !isArray(config)) {
+    return config.raw;
+  }
+  else {
+    return undefined;
+  }
+};
+
 var mustache = {
   name: 'mustache.js',
   version: '4.0.1',
   tags: [ '{{', '}}' ],
   clearCache: undefined,
   escape: undefined,
+  raw: undefined,
   parse: undefined,
   render: undefined,
   Scanner: undefined,
@@ -755,6 +787,8 @@ mustache.render = function render (template, view, partials, config) {
 // Export the escaping function so that the user may override it.
 // See https://github.com/janl/mustache.js/issues/244
 mustache.escape = escapeHtml;
+
+mustache.raw = writeValueRaw;
 
 // Export these mainly for testing, but also for advanced usage.
 mustache.Scanner = Scanner;
